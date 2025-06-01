@@ -14,6 +14,7 @@ st.markdown("""
 - ✅ 텔레그램 핸들 유효성 검사 (영문/숫자/밑줄만 허용)
 - ✅ 트위터 아이디 유효성 검사 (입력한 경우만 적용)
 - 🔁 중복 참가자 자동 제거
+- 🖼️ 업로드 데이터 미리보기 및 정제 상태 시각화
 - 🎲 추첨은 단 1회만 가능
 - 📤 당첨자 발표용 / 운영자용 파일 제공
 """)
@@ -29,21 +30,20 @@ sample_df = pd.DataFrame({
 sample_csv = sample_df.to_csv(index=False).encode('utf-8-sig')
 st.download_button("📄 샘플 CSV 파일 다운로드", sample_csv, "sample.csv", "text/csv")
 
-st.markdown("📝 **CSV/시트 형식 안내**")
-st.markdown("""
-- **1행**: 설명용 텍스트 (자동 무시됨)
-- **2행부터** 실제 참가자 정보
-- 열 순서: `텔레그램 핸들`, `트위터 아이디 (선택사항)`, `전화번호`
-""")
-
 upload_mode = st.radio("📤 데이터를 어떻게 불러올까요?", ["CSV 업로드", "Google Sheets 사용"])
 
-df = None
+df, raw_df = None, None
+state_message = "⚠️ 아직 데이터를 불러오지 않았습니다."
 
 if upload_mode == "CSV 업로드":
     uploaded_file = st.file_uploader("📂 참가자 CSV 업로드", type="csv")
     if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file, skiprows=1, names=["telegram", "twitter", "phone"])
+        raw_df = pd.read_csv(uploaded_file)
+        try:
+            df = pd.read_csv(uploaded_file, skiprows=1, names=["telegram", "twitter", "phone"])
+            state_message = "✅ CSV 데이터 업로드 및 변환 완료!"
+        except:
+            st.error("CSV 파일 형식이 올바르지 않습니다.")
 
 elif upload_mode == "Google Sheets 사용":
     sheet_url = st.text_input("🔗 Google Sheets 공유 링크 입력")
@@ -55,79 +55,18 @@ elif upload_mode == "Google Sheets 사용":
             try:
                 response = requests.get(export_url)
                 response.encoding = 'utf-8'
+                raw_df = pd.read_csv(io.StringIO(response.text))
                 df = pd.read_csv(io.StringIO(response.text), skiprows=1, names=["telegram", "twitter", "phone"])
-            except Exception:
-                st.error("❌ Google Sheets 데이터를 불러오는 데 실패했습니다.")
+                state_message = "✅ Google Sheets 데이터 불러오기 완료!"
+            except:
+                st.error("❌ 데이터를 불러오는 데 실패했습니다.")
         else:
             st.warning("⚠️ 유효한 Google Sheets 링크를 입력해주세요.")
 
-if df is not None:
-    # 텔레그램 유효성 검사
-    def is_valid_telegram(s):
-        if not isinstance(s, str):
-            return False
-        s = s.lstrip('@')
-        return bool(re.fullmatch(r'[a-zA-Z0-9_]+', s))
+# ✅ 상태 표시
+st.info(f"📌 현재 상태: {state_message}")
 
-    df['telegram_valid'] = df['telegram'].apply(is_valid_telegram)
-    invalid_telegram = df[df['telegram_valid'] == False]
-    df = df[df['telegram_valid'] == True].drop(columns=['telegram_valid'])
-
-    if not invalid_telegram.empty:
-        st.warning(f"🚫 유효하지 않은 텔레그램 핸들 {len(invalid_telegram)}명 제외")
-        with st.expander("❌ 제외된 텔레그램 참가자"):
-            st.dataframe(invalid_telegram)
-
-    # 트위터 유효성 검사
-    def is_valid_or_empty_twitter(s):
-        if not isinstance(s, str) or s.strip() == "":
-            return True
-        s = s.lstrip('@')
-        return bool(re.fullmatch(r'[A-Za-z0-9_]{1,15}', s))
-
-    df['twitter_valid'] = df['twitter'].apply(is_valid_or_empty_twitter)
-    invalid_twitter = df[df['twitter_valid'] == False]
-    df = df[df['twitter_valid'] == True].drop(columns=['twitter_valid'])
-
-    if not invalid_twitter.empty:
-        st.warning(f"🚫 유효하지 않은 트위터 아이디 {len(invalid_twitter)}명 제외")
-        with st.expander("❌ 제외된 트위터 참가자"):
-            st.dataframe(invalid_twitter)
-
-    # 중복 제거
-    original_count = len(df)
-    duplicates = df[df.duplicated()]
-    df = df.drop_duplicates()
-    removed = original_count - len(df)
-
-    if removed > 0:
-        st.warning(f"⚠️ 중복 참가자 {removed}명 제거 완료")
-        with st.expander("📋 중복 제거된 참가자 목록"):
-            st.dataframe(duplicates)
-
-    st.subheader(f"🎯 최종 유효 참가자 수: {len(df)}명")
-    st.dataframe(df)
-
-    # 추첨
-    num_winners = st.number_input("🎁 추첨할 당첨자 수", min_value=1, max_value=len(df), value=1, step=1)
-
-    if 'drawn' not in st.session_state:
-        st.session_state.drawn = False
-
-    if st.button("🎲 당첨자 추첨하기") and not st.session_state.drawn:
-        winners = df.sample(n=num_winners)
-        st.session_state.winners = winners
-        st.session_state.drawn = True
-        st.success("🎉 아래는 무작위로 추첨된 당첨자 목록입니다!")
-        st.dataframe(winners)
-
-        # 발표용
-        csv_public = winners[["telegram"]].to_csv(index=False).encode('utf-8-sig')
-        csv_full = winners.to_csv(index=False).encode('utf-8-sig')
-
-        st.download_button("📥 당첨자 발표용 (텔레그램만)", csv_public, "winners_public.csv", "text/csv")
-        st.download_button("🔒 운영자용 전체 정보 다운로드", csv_full, "winners_full.csv", "text/csv")
-
-    elif st.session_state.drawn:
-        st.warning("⚠️ 이미 추첨이 완료되었습니다. 추첨은 한 번만 가능합니다.")
-        st.dataframe(st.session_state.winners)
+# ✅ 업로드 원본 미리보기
+if raw_df is not None:
+    st.subheader("🔍 업로드한 원본 데이터 미리보기 (상위 10개)")
+    st.dataframe(raw_df.head(10))
