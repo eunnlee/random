@@ -131,9 +131,13 @@ if df is not None:
     elif st.session_state.drawn:
         st.warning("⚠️ 이미 추첨이 완료되었습니다. 추첨은 한 번만 가능합니다.")
         st.dataframe(st.session_state.winners)
+
+
 st.markdown("---")
-col1, col2 = st.columns([1, 10])
-with col1:
-    st.image("https://raw.githubusercontent.com/eunnlee/random/main/logo.png", width=200)
-with col2:
-    st.markdown("**Powered by INFCL**")
+st.markdown("""
+<div style='text-align: center;'>
+    <img src='https://raw.githubusercontent.com/eunnlee/random/main/logo.png' width='600'/>
+    <div style='font-weight: bold; margin-top: 8px;'>Powered by INFCL</div>
+</div>
+""", unsafe_allow_html=True)
+
