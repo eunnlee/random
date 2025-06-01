@@ -108,31 +108,39 @@ if df is not None:
     st.subheader(f"🎯 최종 유효 참가자 수: {len(df)}명")
     st.dataframe(df)
 
-    # 추첨
-    num_winners = st.number_input("🎁 추첨할 당첨자 수", min_value=1, max_value=len(df), value=1, step=1)
+    # 추첨 기능
+    if len(df) >= 1:
+        num_winners = st.number_input(
+            "🎁 추첨할 당첨자 수",
+            min_value=1,
+            max_value=len(df),
+            value=1,
+            step=1
+        )
 
-    if 'drawn' not in st.session_state:
-        st.session_state.drawn = False
+        if 'drawn' not in st.session_state:
+            st.session_state.drawn = False
 
-    if st.button("🎲 당첨자 추첨하기") and not st.session_state.drawn:
-        winners = df.sample(n=num_winners)
-        st.session_state.winners = winners
-        st.session_state.drawn = True
-        st.success("🎉 아래는 무작위로 추첨된 당첨자 목록입니다!")
-        st.dataframe(winners)
+        if st.button("🎲 당첨자 추첨하기") and not st.session_state.drawn:
+            winners = df.sample(n=num_winners)
+            st.session_state.winners = winners
+            st.session_state.drawn = True
+            st.success("🎉 아래는 무작위로 추첨된 당첨자 목록입니다!")
+            st.dataframe(winners)
 
-        # 발표용
-        csv_public = winners[["telegram"]].to_csv(index=False).encode('utf-8-sig')
-        csv_full = winners.to_csv(index=False).encode('utf-8-sig')
+            csv_public = winners[["telegram"]].to_csv(index=False).encode('utf-8-sig')
+            csv_full = winners.to_csv(index=False).encode('utf-8-sig')
 
-        st.download_button("📥 당첨자 발표용 (텔레그램만)", csv_public, "winners_public.csv", "text/csv")
-        st.download_button("🔒 운영자용 전체 정보 다운로드", csv_full, "winners_full.csv", "text/csv")
+            st.download_button("📥 당첨자 발표용 (텔레그램만)", csv_public, "winners_public.csv", "text/csv")
+            st.download_button("🔒 운영자용 전체 정보 다운로드", csv_full, "winners_full.csv", "text/csv")
 
-    elif st.session_state.drawn:
-        st.warning("⚠️ 이미 추첨이 완료되었습니다. 추첨은 한 번만 가능합니다.")
-        st.dataframe(st.session_state.winners)
+        elif st.session_state.drawn:
+            st.warning("⚠️ 이미 추첨이 완료되었습니다. 추첨은 한 번만 가능합니다.")
+            st.dataframe(st.session_state.winners)
+    else:
+        st.warning("❗ 유효한 참가자가 없습니다. 파일을 다시 확인해주세요.")
 
-
+# 하단 로고 표시
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center;'>
@@ -140,4 +148,3 @@ st.markdown("""
     <div style='font-weight: bold; margin-top: 8px;'>Powered by INFCL</div>
 </div>
 """, unsafe_allow_html=True)
-
