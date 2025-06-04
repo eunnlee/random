@@ -1,3 +1,4 @@
+# 파일명 예시: event_draw.py
 import streamlit as st
 import pandas as pd
 import re
@@ -12,8 +13,8 @@ st.markdown("""
 다음과 같은 기능이 자동 적용됩니다:
 
 - ✅ 텔레그램 핸들 유효성 검사 (영문/숫자/밑줄만 허용, 공백 자동 제거)
-- ✅ 트위터 아이디 유효성 검사 (입력한 경우만 적용, 공백 자동 제거)
-- ✅ 전화번호 11자리만 유효 처리 (숫자만 추출하여 검사)
+- ✅ 트위터 아이디 유효성 검사 (입력한 경우만 적용)
+- ✅ 전화번호는 +82 제거 및 '010 0000 0000' 형식으로 정리
 - 🔁 중복 참가자 자동 제거
 - 🎲 추첨은 단 1회만 가능
 - 📤 당첨자 발표용 / 운영자용 파일 제공
@@ -21,10 +22,11 @@ st.markdown("""
 
 st.markdown("⚠️ **한 번 추첨하면 다시 돌릴 수 없습니다.**")
 
+# 샘플 CSV 다운로드
 sample_df = pd.DataFrame({
     "이 열은 텔레그램 핸들을 입력하세요": ["@sample1", "@sample2"],
     "트위터 아이디 입력 (선택사항)": ["@twitter1", ""],
-    "기프티콘 받을 전화번호 입력": ["010-1234-5678", "010-9876-5432"]
+    "기프티콘 받을 전화번호 입력": ["010-1234-5678", "+82 10 9876 5432"]
 })
 sample_csv = sample_df.to_csv(index=False).encode('utf-8-sig')
 st.download_button("📄 샘플 CSV 파일 다운로드", sample_csv, "sample.csv", "text/csv")
@@ -94,19 +96,25 @@ if df is not None:
         with st.expander("❌ 제외된 트위터 참가자"):
             st.dataframe(invalid_twitter)
 
-    # 전화번호 유효성 검사
-    def is_valid_phone(s):
-        if not isinstance(s, str):
-            return False
-        digits = re.sub(r'\D', '', s)
-        return len(digits) == 11
+    # 전화번호 정규화
+    def normalize_phone(phone):
+        if not isinstance(phone, str):
+            phone = str(phone)
+        phone = phone.replace(" ", "").replace("-", "")
+        if phone.startswith("+82"):
+            phone = "0" + phone[3:]
+        if len(phone) == 10 and not phone.startswith("0"):
+            phone = "0" + phone
+        if re.fullmatch(r"\d{11}", phone):
+            return f"{phone[:3]} {phone[3:7]} {phone[7:]}"
+        return None
 
-    df['phone_valid'] = df['phone'].apply(is_valid_phone)
-    invalid_phone = df[df['phone_valid'] == False]
-    df = df[df['phone_valid'] == True].drop(columns=['phone_valid'])
+    df['phone'] = df['phone'].apply(normalize_phone)
+    invalid_phone = df[df['phone'].isnull()]
+    df = df.dropna(subset=['phone'])
 
     if not invalid_phone.empty:
-        st.warning(f"📵 유효하지 않은 전화번호 {len(invalid_phone)}명 제외")
+        st.warning(f"🚫 유효하지 않은 전화번호 {len(invalid_phone)}명 제외")
         with st.expander("❌ 제외된 전화번호 참가자"):
             st.dataframe(invalid_phone)
 
@@ -137,6 +145,7 @@ if df is not None:
         st.success("🎉 아래는 무작위로 추첨된 당첨자 목록입니다!")
         st.dataframe(winners)
 
+        # 발표용
         csv_public = winners[["telegram"]].to_csv(index=False).encode('utf-8-sig')
         csv_full = winners.to_csv(index=False).encode('utf-8-sig')
 
