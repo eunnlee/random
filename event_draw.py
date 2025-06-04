@@ -1,5 +1,3 @@
-# 파일명 예시: event_draw.py
-
 import streamlit as st
 import pandas as pd
 import re
@@ -10,15 +8,17 @@ st.set_page_config(page_title="이벤트 추첨기", page_icon="🎁")
 
 st.title("🎁 이벤트 무작위 추첨기")
 st.markdown("""
-이 도구는 **공정한 이벤트 추첨**을 위해 만들어졌습니다.
+이 도구는 **공정한 이벤트 추첨**을 위해 만들어졌습니다.  
+다음과 같은 기능이 자동 적용됩니다:
 
-- ✅ 텔레그램 핸들 유효성 검사 (영문/숫자/밑줄만 허용, 공백 자동 제거)
-- ✅ 트위터 아이디 유효성 검사 (입력 시만 적용)
-- ✅ 전화번호는 숫자만 추출 후, 11자리만 허용 (010xxxxxxxx 형식)
+- ✅ 텔레그램 핸들 유효성 검사 (영문/숫자/밑줄만 허용, 공백 제거)
+- ✅ 트위터 아이디 유효성 검사 (입력한 경우만, 공백 제거)
+- ✅ 전화번호 형식 확인 (숫자만, 11자리만 허용)
 - 🔁 중복 참가자 자동 제거
 - 🎲 추첨은 단 1회만 가능
-- 📤 당첨자 발표용 / 운영자용 파일 제공
+- 📤 당첨자 발표용(전화번호 마스킹) / 운영자용(원본) 파일 제공
 """)
+
 st.markdown("⚠️ **한 번 추첨하면 다시 돌릴 수 없습니다.**")
 
 # 샘플 CSV 다운로드
@@ -43,7 +43,7 @@ df = None
 
 if upload_mode == "CSV 업로드":
     uploaded_file = st.file_uploader("📂 참가자 CSV 업로드", type="csv")
-    if uploaded_file:
+    if uploaded_file is not None:
         df = pd.read_csv(uploaded_file, skiprows=1, names=["telegram", "twitter", "phone"])
 
 elif upload_mode == "Google Sheets 사용":
@@ -63,38 +63,56 @@ elif upload_mode == "Google Sheets 사용":
             st.warning("⚠️ 유효한 Google Sheets 링크를 입력해주세요.")
 
 if df is not None:
-    # 정리 및 유효성 검사
+    # 공백 제거
+    df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+
+    # 텔레그램 유효성 검사
     def is_valid_telegram(s):
         if not isinstance(s, str):
             return False
-        s = s.strip().lstrip('@')
+        s = s.lstrip('@')
         return bool(re.fullmatch(r'[a-zA-Z0-9_]+', s))
 
+    df['telegram_valid'] = df['telegram'].apply(is_valid_telegram)
+    invalid_telegram = df[df['telegram_valid'] == False]
+    df = df[df['telegram_valid'] == True].drop(columns=['telegram_valid'])
+
+    if not invalid_telegram.empty:
+        st.warning(f"🚫 유효하지 않은 텔레그램 핸들 {len(invalid_telegram)}명 제외")
+        with st.expander("❌ 제외된 텔레그램 참가자"):
+            st.dataframe(invalid_telegram)
+
+    # 트위터 유효성 검사
     def is_valid_or_empty_twitter(s):
         if not isinstance(s, str) or s.strip() == "":
             return True
-        s = s.strip().lstrip('@')
+        s = s.lstrip('@')
         return bool(re.fullmatch(r'[A-Za-z0-9_]{1,15}', s))
 
-    def format_and_validate_phone(p):
-        if not isinstance(p, str):
-            return False
-        digits = re.sub(r'\D', '', p)
-        if len(digits) == 10 and digits.startswith("10"):
-            digits = "0" + digits
-        return digits if len(digits) == 11 else False
+    df['twitter_valid'] = df['twitter'].apply(is_valid_or_empty_twitter)
+    invalid_twitter = df[df['twitter_valid'] == False]
+    df = df[df['twitter_valid'] == True].drop(columns=['twitter_valid'])
 
-    df["telegram_valid"] = df["telegram"].apply(is_valid_telegram)
-    invalid_telegram = df[df["telegram_valid"] == False]
-    df = df[df["telegram_valid"] == True].drop(columns=["telegram_valid"])
+    if not invalid_twitter.empty:
+        st.warning(f"🚫 유효하지 않은 트위터 아이디 {len(invalid_twitter)}명 제외")
+        with st.expander("❌ 제외된 트위터 참가자"):
+            st.dataframe(invalid_twitter)
 
-    df["twitter_valid"] = df["twitter"].apply(is_valid_or_empty_twitter)
-    invalid_twitter = df[df["twitter_valid"] == False]
-    df = df[df["twitter_valid"] == True].drop(columns=["twitter_valid"])
+    # 전화번호 유효성 검사 (11자리 숫자만)
+    def clean_phone(phone):
+        digits = re.sub(r'\D', '', str(phone))
+        return digits if len(digits) == 11 else None
 
-    df["phone"] = df["phone"].apply(format_and_validate_phone)
-    invalid_phone = df[df["phone"] == False]
-    df = df[df["phone"] != False]
+    df["phone_clean"] = df["phone"].apply(clean_phone)
+    invalid_phone = df[df["phone_clean"].isnull()]
+    df = df[df["phone_clean"].notnull()]
+    df["phone"] = df["phone_clean"]
+    df.drop(columns=["phone_clean"], inplace=True)
+
+    if not invalid_phone.empty:
+        st.warning(f"📵 유효하지 않은 전화번호 {len(invalid_phone)}명 제외")
+        with st.expander("❌ 제외된 전화번호 참가자"):
+            st.dataframe(invalid_phone)
 
     # 중복 제거
     original_count = len(df)
@@ -102,19 +120,6 @@ if df is not None:
     df = df.drop_duplicates()
     removed = original_count - len(df)
 
-    # 안내 메시지
-    if not invalid_telegram.empty:
-        st.warning(f"🚫 유효하지 않은 텔레그램 핸들 {len(invalid_telegram)}명 제외")
-        with st.expander("❌ 제외된 텔레그램 참가자"):
-            st.dataframe(invalid_telegram)
-    if not invalid_twitter.empty:
-        st.warning(f"🚫 유효하지 않은 트위터 아이디 {len(invalid_twitter)}명 제외")
-        with st.expander("❌ 제외된 트위터 참가자"):
-            st.dataframe(invalid_twitter)
-    if not invalid_phone.empty:
-        st.warning(f"🚫 유효하지 않은 전화번호 {len(invalid_phone)}명 제외")
-        with st.expander("❌ 제외된 전화번호 참가자"):
-            st.dataframe(invalid_phone)
     if removed > 0:
         st.warning(f"⚠️ 중복 참가자 {removed}명 제거 완료")
         with st.expander("📋 중복 제거된 참가자 목록"):
@@ -123,47 +128,36 @@ if df is not None:
     st.subheader(f"🎯 최종 유효 참가자 수: {len(df)}명")
     st.dataframe(df)
 
-    # 추첨 상품별 인원 설정
-    st.subheader("🎁 추첨 상품과 인원 설정")
-    reward_count = st.number_input("추첨할 상품 개수", min_value=1, value=1, step=1)
-    rewards = {}
+    # 추첨
+    num_winners = st.number_input("🎁 추첨할 당첨자 수", min_value=1, max_value=len(df), value=1, step=1)
 
-    for i in range(reward_count):
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            prize = st.text_input(f"상품 {i+1} 이름", key=f"prize_{i}")
-        with col2:
-            count = st.number_input(f"{prize} 당첨자 수", min_value=1, max_value=len(df), value=1, key=f"count_{i}")
-        if prize:
-            rewards[prize] = count
-
-    if "drawn" not in st.session_state:
+    if 'drawn' not in st.session_state:
         st.session_state.drawn = False
 
     if st.button("🎲 당첨자 추첨하기") and not st.session_state.drawn:
-        drawn = []
-        remaining_df = df.copy()
-
-        for prize, count in rewards.items():
-            count = min(count, len(remaining_df))
-            selected = remaining_df.sample(n=count)
-            selected["상품"] = prize
-            drawn.append(selected)
-            remaining_df = remaining_df.drop(selected.index)
-
-        winners_df = pd.concat(drawn)
-        st.session_state.winners = winners_df
+        winners = df.sample(n=num_winners).copy()
+        st.session_state.winners = winners
         st.session_state.drawn = True
 
+        # 전화번호 마스킹
+        def mask_phone(phone):
+            return phone[:3] + "****" + phone[7:]
+
+        winners_masked = winners.copy()
+        winners_masked["phone"] = winners_masked["phone"].apply(mask_phone)
+
         st.success("🎉 아래는 무작위로 추첨된 당첨자 목록입니다!")
-        st.dataframe(winners_df)
+        st.dataframe(winners_masked)
 
-        csv_public = winners_df[["telegram", "상품"]].to_csv(index=False).encode("utf-8-sig")
-        csv_full = winners_df.to_csv(index=False).encode("utf-8-sig")
+        # 발표용
+        csv_public = winners_masked[["telegram", "twitter", "phone"]].to_csv(index=False).encode('utf-8-sig')
+        csv_full = winners.to_csv(index=False).encode('utf-8-sig')
 
-        st.download_button("📥 당첨자 발표용 (텔레그램+상품)", csv_public, "winners_public.csv", "text/csv")
+        st.download_button("📥 당첨자 발표용 (전화번호 마스킹)", csv_public, "winners_public.csv", "text/csv")
         st.download_button("🔒 운영자용 전체 정보 다운로드", csv_full, "winners_full.csv", "text/csv")
 
     elif st.session_state.drawn:
         st.warning("⚠️ 이미 추첨이 완료되었습니다. 추첨은 한 번만 가능합니다.")
-        st.dataframe(st.session_state.winners)
+        winners_masked = st.session_state.winners.copy()
+        winners_masked["phone"] = winners_masked["phone"].apply(lambda x: x[:3] + "****" + x[7:])
+        st.dataframe(winners_masked)
