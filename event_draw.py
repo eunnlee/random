@@ -11,8 +11,9 @@ st.markdown("""
 이 도구는 **공정한 이벤트 추첨**을 위해 만들어졌습니다.  
 다음과 같은 기능이 자동 적용됩니다:
 
-- ✅ 텔레그램 핸들 유효성 검사 (영문/숫자/밑줄만 허용)
-- ✅ 트위터 아이디 유효성 검사 (입력한 경우만 적용)
+- ✅ 텔레그램 핸들 유효성 검사 (영문/숫자/밑줄만 허용, 공백 자동 제거)
+- ✅ 트위터 아이디 유효성 검사 (입력한 경우만 적용, 공백 자동 제거)
+- ✅ 전화번호 11자리만 유효 처리 (숫자만 추출하여 검사)
 - 🔁 중복 참가자 자동 제거
 - 🎲 추첨은 단 1회만 가능
 - 📤 당첨자 발표용 / 운영자용 파일 제공
@@ -20,7 +21,6 @@ st.markdown("""
 
 st.markdown("⚠️ **한 번 추첨하면 다시 돌릴 수 없습니다.**")
 
-# 샘플 CSV 다운로드
 sample_df = pd.DataFrame({
     "이 열은 텔레그램 핸들을 입력하세요": ["@sample1", "@sample2"],
     "트위터 아이디 입력 (선택사항)": ["@twitter1", ""],
@@ -66,7 +66,7 @@ if df is not None:
     def is_valid_telegram(s):
         if not isinstance(s, str):
             return False
-        s = s.lstrip('@')
+        s = s.strip().lstrip('@')
         return bool(re.fullmatch(r'[a-zA-Z0-9_]+', s))
 
     df['telegram_valid'] = df['telegram'].apply(is_valid_telegram)
@@ -82,7 +82,7 @@ if df is not None:
     def is_valid_or_empty_twitter(s):
         if not isinstance(s, str) or s.strip() == "":
             return True
-        s = s.lstrip('@')
+        s = s.strip().lstrip('@')
         return bool(re.fullmatch(r'[A-Za-z0-9_]{1,15}', s))
 
     df['twitter_valid'] = df['twitter'].apply(is_valid_or_empty_twitter)
@@ -93,6 +93,22 @@ if df is not None:
         st.warning(f"🚫 유효하지 않은 트위터 아이디 {len(invalid_twitter)}명 제외")
         with st.expander("❌ 제외된 트위터 참가자"):
             st.dataframe(invalid_twitter)
+
+    # 전화번호 유효성 검사
+    def is_valid_phone(s):
+        if not isinstance(s, str):
+            return False
+        digits = re.sub(r'\D', '', s)
+        return len(digits) == 11
+
+    df['phone_valid'] = df['phone'].apply(is_valid_phone)
+    invalid_phone = df[df['phone_valid'] == False]
+    df = df[df['phone_valid'] == True].drop(columns=['phone_valid'])
+
+    if not invalid_phone.empty:
+        st.warning(f"📵 유효하지 않은 전화번호 {len(invalid_phone)}명 제외")
+        with st.expander("❌ 제외된 전화번호 참가자"):
+            st.dataframe(invalid_phone)
 
     # 중복 제거
     original_count = len(df)
@@ -108,43 +124,25 @@ if df is not None:
     st.subheader(f"🎯 최종 유효 참가자 수: {len(df)}명")
     st.dataframe(df)
 
-    # 추첨 기능
-    if len(df) >= 1:
-        num_winners = st.number_input(
-            "🎁 추첨할 당첨자 수",
-            min_value=1,
-            max_value=len(df),
-            value=1,
-            step=1
-        )
+    # 추첨
+    num_winners = st.number_input("🎁 추첨할 당첨자 수", min_value=1, max_value=len(df), value=1, step=1)
 
-        if 'drawn' not in st.session_state:
-            st.session_state.drawn = False
+    if 'drawn' not in st.session_state:
+        st.session_state.drawn = False
 
-        if st.button("🎲 당첨자 추첨하기") and not st.session_state.drawn:
-            winners = df.sample(n=num_winners)
-            st.session_state.winners = winners
-            st.session_state.drawn = True
-            st.success("🎉 아래는 무작위로 추첨된 당첨자 목록입니다!")
-            st.dataframe(winners)
+    if st.button("🎲 당첨자 추첨하기") and not st.session_state.drawn:
+        winners = df.sample(n=num_winners)
+        st.session_state.winners = winners
+        st.session_state.drawn = True
+        st.success("🎉 아래는 무작위로 추첨된 당첨자 목록입니다!")
+        st.dataframe(winners)
 
-            csv_public = winners[["telegram"]].to_csv(index=False).encode('utf-8-sig')
-            csv_full = winners.to_csv(index=False).encode('utf-8-sig')
+        csv_public = winners[["telegram"]].to_csv(index=False).encode('utf-8-sig')
+        csv_full = winners.to_csv(index=False).encode('utf-8-sig')
 
-            st.download_button("📥 당첨자 발표용 (텔레그램만)", csv_public, "winners_public.csv", "text/csv")
-            st.download_button("🔒 운영자용 전체 정보 다운로드", csv_full, "winners_full.csv", "text/csv")
+        st.download_button("📥 당첨자 발표용 (텔레그램만)", csv_public, "winners_public.csv", "text/csv")
+        st.download_button("🔒 운영자용 전체 정보 다운로드", csv_full, "winners_full.csv", "text/csv")
 
-        elif st.session_state.drawn:
-            st.warning("⚠️ 이미 추첨이 완료되었습니다. 추첨은 한 번만 가능합니다.")
-            st.dataframe(st.session_state.winners)
-    else:
-        st.warning("❗ 유효한 참가자가 없습니다. 파일을 다시 확인해주세요.")
-
-# 하단 로고 표시
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center;'>
-    <img src='https://raw.githubusercontent.com/eunnlee/random/main/logo.png' width='600'/>
-    <div style='font-weight: bold; margin-top: 8px;'>Powered by INFCL</div>
-</div>
-""", unsafe_allow_html=True)
+    elif st.session_state.drawn:
+        st.warning("⚠️ 이미 추첨이 완료되었습니다. 추첨은 한 번만 가능합니다.")
+        st.dataframe(st.session_state.winners)
